@@ -111,6 +111,8 @@ class AGI
      */
     public $option_delim = ",";
 
+    public $async = false;
+
     const AST_CONFIG_DIR = '/etc/asterisk/';
 
     const AST_SPOOL_DIR = '/var/spool/asterisk/';
@@ -155,7 +157,7 @@ class AGI
      */
     public function __construct($config = NULL, $optconfig = array())
     {
-        static::initialize();
+        // static::initialize();
 
         // load config
         if (! is_null($config) && file_exists($config))
@@ -193,8 +195,7 @@ class AGI
 
         // initialize error handler
         if ($this->config['phpagi']['error_handler'] == true) {
-            set_error_handler('phpagi_error_handler');
-            $GLOBALS['phpagi_error_handler_email'];
+            set_error_handler('mdc\phpagi\phpagi_error_handler');
             $GLOBALS['phpagi_error_handler_email'] = $this->config['phpagi']['admin'];
             error_reporting(E_ALL);
         }
@@ -212,7 +213,9 @@ class AGI
 
         // open audio if eagi detected
         if ($this->request['agi_enhanced'] == '1.0') {
-            if (file_exists('/proc/' . getmypid() . '/fd/3'))
+            if (array_search('php', stream_get_wrappers()) !== FALSE)
+                $this->audio = fopen('php://fd/' . static::AUDIO_FILENO, 'r');
+            elseif(file_exists('/proc/' . getmypid() . '/fd/3'))
                 $this->audio = fopen('/proc/' . getmypid() . '/fd/3', 'r');
             elseif (file_exists('/dev/fd/3')) {
                 // may need to mount fdescfs
@@ -1814,16 +1817,46 @@ class AGI
      */
     public function evaluate($command)
     {
+        static $pending_result = false;
+
+        if (!$this->async) {
+          $this->evaluate_write($command);
+          $output = $this->evaluate_read();
+          $pending_result = false;
+        } else {
+          if ($pending_result === false) {
+            $this->evaluate_write("VERBOSE \"-ping-\" 1");
+          }
+          $output = $this->evaluate_read();
+          $this->evaluate_write($command);
+          $pending_result = true;
+        }
+        return $output;
+    }
+
+    public function evaluate_write($command)
+    {
         $broken = array(
             'code' => 500,
             'result' => - 1,
             'data' => ''
         );
 
+        // $command = str_replace('"', '\\"', $command); // in case quotes are not working for application, we faced this issue with MRCPRecog
+
         // write command
         if (! @fwrite($this->out, trim($command) . "\n"))
             return $broken;
         fflush($this->out);
+    }
+
+    public function evaluate_read()
+    {
+        $broken = array(
+            'code' => 500,
+            'result' => - 1,
+            'data' => ''
+        );
 
         // Read result. Occasionally, a command return a string followed by an extra new line.
         // When this happens, our script will ignore the new line, but it will still be in the
