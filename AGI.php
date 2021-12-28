@@ -212,8 +212,8 @@ class AGI
 
         // open audio if eagi detected
         if ($this->request['agi_enhanced'] == '1.0') {
-            if (file_exists('/proc/' . getmypid() . '/fd/3'))
-                $this->audio = fopen('/proc/' . getmypid() . '/fd/3', 'r');
+              if (array_search('php', stream_get_wrappers()) !== FALSE)
+                $this->audio = fopen('php://fd/' . AUDIO_FILENO, 'r');
             elseif (file_exists('/dev/fd/3')) {
                 // may need to mount fdescfs
                 $this->audio = fopen('/dev/fd/3', 'r');
@@ -1819,6 +1819,8 @@ class AGI
             'result' => - 1,
             'data' => ''
         );
+
+        // $command = str_replace('"', '\\"', $command); // in case quotes are not working for application, we faced this issue with MRCPRecog
 
         // write command
         if (! @fwrite($this->out, trim($command) . "\n"))
